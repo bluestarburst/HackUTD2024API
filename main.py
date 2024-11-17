@@ -21,20 +21,53 @@ client = openai.OpenAI(
 
 app = FastAPI()
 
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
+# Load the model and tokenizer
+model_name = "biodatlab/score-claim-identification"
+tokenizer = AutoTokenizer.from_pretrained(model_name)
+model = AutoModelForSequenceClassification.from_pretrained(model_name)
+
+def is_claim(text: str) -> bool:
+    """
+    Determine if the given text is a claim.
+
+    Args:
+        text (str): The input text.
+
+    Returns:
+        bool: True if the text is a claim, False otherwise.
+    """
+    # Tokenize the input text
+    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding="longest")
+    
+    # Get model predictions
+    logits = model(**inputs).logits
+    
+    # Get the label with the highest score
+    pred = logits.argmax(dim=1).item()
+    
+    # Return True if it's classified as a claim (label 1)
+    return pred == 1
+
+# Example usage
+text = "The global temperature is rising due to human activities."
+print(f"Is the text a claim? {is_claim(text)}")
+
 class Source:
     title: str
     url: str
     publisher: str
     rating: str
     
-    def __init__(self, title: str, url: str, publisher: str, rating: str):
+    def __init__(self, url: str, title: str = None, publisher: str = None, rating: str = None):
         self.title = title
         self.url = url
         self.publisher = publisher
         self.rating = rating
         
     def create_html_link(self):
-        return "<a href='" + self.url + "'>" + self.title + "</a>"
+        return "<a href='" + self.url + "'>" + (self.title if self.title else self.url) + "</a>"
 
 class Message:
     text: str
@@ -75,7 +108,7 @@ class Transcript:
         # return markdown.markdown("| User | Message |\n| --- | --- |\n" + "\n".join(["| " + message.user + " | " + message.text.replace("\n", "<br>") + " |" for message in self.messages]), extensions=['tables'], output_format='html5')
         
         # return styled html table with user and message columns
-        return "<table><tr><th>User</th><th>Message</th></tr>" + "\n".join(["<tr><td style='padding: 1rem 0; width: 125px; display: flex; flex-direction: column; justify-content: start; align-items: end;'><b>" + message.user + ":</b></td><td style='padding: 1rem 0'>" + message.text.replace("\n", "<br>") + "<br><br>" + "<br>".join([source.create_html_link() + " - (Rating: " + source.rating + ") - " + source.publisher for source in message.sources]) + "</td></tr>" for message in self.messages]) + "</table>"
+        return "<table><tr><th>User</th><th>Message</th></tr>" + "\n".join(["<tr><td style='padding: 1rem 0; width: 125px; display: flex; flex-direction: column; justify-content: start; align-items: end;'><b>" + message.user + ":</b></td><td style='padding: 1rem 0'>" + message.text.replace("\n", "<br>") + "<br><br>" + "<br>".join([source.create_html_link() for source in message.sources]) + "</td></tr>" for message in self.messages]) + "</table>"
 
 transcript = Transcript()
 
@@ -145,38 +178,79 @@ def add_transcript(message: str, user: str):
     print(response.choices[0].message.content)
     
     if response.choices[0].message.content.lower().startswith("claim"):
-        # fact check the message using google fact check tools
-        res = requests.get("https://factchecktools.googleapis.com/v1alpha1/claims:search?query=" + message + "&key=" + os.environ.get("GOOGLE_API_KEY"))
         
-        print(os.environ.get("GOOGLE_API_KEY"))
-        json = res.json()
-        
-        claims = json.get("claims")
-        
-        if not claims:
-            print("No relevant sources found.")
-            return {"fact check": "No relevant sources found."}
-        
-        # print(claims[0])
-        # print(claims[0].get("text"), claims[0].get("claimReview")[0].get("textualRating"))
-        
-        claim_context = "\n".join(["Claim: " + claims[0].get("text"), "Rating: " + claims[0].get("claimReview")[0].get("textualRating")])
-        
-        response = client.chat.completions.create(
-            model='Meta-Llama-3.1-8B-Instruct',
-            messages=[
-                {"role":"system", "content": "You are an objective observer and your job is to condense the information into a brief summary."},
-                {"role":"user", "content": claim_context + "\nCompile the results of the previous claims and their ratings to serve as knowledge. Respond only to the claim in the following message in 2 sentences or less:\n" + message} 
-            ],
-            temperature =  0.1,
-            top_p = 0.1
-        )
+        url = "https://api.perplexity.ai/chat/completions"
 
-        print(response.choices[0].message.content)
+        payload = {
+            "model": "llama-3.1-sonar-small-128k-online",
+            "messages": [
+                {
+                    "role": "system",
+                    "content": "Be precise and concise."
+                },
+                {
+                    "role": "user",
+                    "content": "Fact check the following statement: " + message + "\nRespond with two sentences. The first sentence should confirm or deny the claim. The second sentence should provide the truth."
+                }
+            ],
+            "max_tokens": 75,
+            "temperature": 0.2,
+            "top_p": 0.9,
+            "return_citations": True,
+            "search_domain_filter": ["perplexity.ai"],
+            "return_images": False,
+            "return_related_questions": False,
+            "search_recency_filter": "month",
+            "top_k": 0,
+            "stream": False,
+            "presence_penalty": 0,
+            "frequency_penalty": 1
+        }
+        headers = {
+            "Authorization": "Bearer " + os.environ.get("PERPLEXITY_API_KEY"),
+            "Content-Type": "application/json"
+        }
+
+        response = requests.request("POST", url, json=payload, headers=headers)
+
+        result = response.json()
         
-        transcript.add_message(Message(text=response.choices[0].message.content, user="Fact Check", sources=[Source(claim.get("claimReview")[0].get("title"), claim.get("claimReview")[0].get("url"), claim.get("claimReview")[0].get("publisher").get("name"), claim.get("claimReview")[0].get("textualRating")) for claim in claims]))
+        print(json.dumps(result, indent=4))
         
-        return {"fact check": response.choices[0].message.content}
+        transcript.add_message(Message(text=result.get("choices")[0].get("message").get("content"), user="Fact Check", sources=[Source(citation) for citation in result.get("citations")]))
+        
+        # fact check the message using google fact check tools
+        # res = requests.get("https://factchecktools.googleapis.com/v1alpha1/claims:search?query=" + message + "&key=" + os.environ.get("GOOGLE_API_KEY"))
+        
+        # print(os.environ.get("GOOGLE_API_KEY"))
+        # json = res.json()
+        
+        # claims = json.get("claims")
+        
+        # if not claims:
+        #     print("No relevant sources found.")
+        #     return {"fact check": "No relevant sources found."}
+        
+        # # print(claims[0])
+        # # print(claims[0].get("text"), claims[0].get("claimReview")[0].get("textualRating"))
+        
+        # claim_context = "\n".join(["Claim: " + claims[0].get("text"), "Rating: " + claims[0].get("claimReview")[0].get("textualRating")])
+        
+        # response = client.chat.completions.create(
+        #     model='Meta-Llama-3.1-8B-Instruct',
+        #     messages=[
+        #         {"role":"system", "content": "You are an objective observer and your job is to condense the information into a brief summary."},
+        #         {"role":"user", "content": claim_context + "\nCompile the results of the previous claims and their ratings to serve as knowledge. Respond only to the claim in the following message in 2 sentences or less:\n" + message} 
+        #     ],
+        #     temperature =  0.1,
+        #     top_p = 0.1
+        # )
+
+        # print(response.choices[0].message.content)
+        
+        # transcript.add_message(Message(text=response.choices[0].message.content, user="Fact Check", sources=[Source(claim.get("claimReview")[0].get("title"), claim.get("claimReview")[0].get("url"), claim.get("claimReview")[0].get("publisher").get("name"), claim.get("claimReview")[0].get("textualRating")) for claim in claims]))
+        
+        # return {"fact check": response.choices[0].message.content}
 
     return {"fact check": None}
 
