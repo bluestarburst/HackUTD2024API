@@ -447,6 +447,6 @@ def add_transcript(message: str, user: str):
 
 start_transcript()
 add_transcript("There once were thousands of aliens on Earth", "me")
-add_transcript("There once were thousands of aliens on Earth", "me")
+add_transcript("Ants are 10x stronger than humans", "me")
 # add_transcript("There once were thousands of aliens on Earth", "me")
 end_transcript()
