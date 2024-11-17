@@ -1,6 +1,6 @@
 from typing import Union
 
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, HTTPException, File
 
 import random
 
@@ -11,6 +11,7 @@ import os
 import openai
 import requests
 import json
+import base64
 from weasyprint import HTML
 
 from requests_toolbelt.multipart.encoder import MultipartEncoder
@@ -60,6 +61,61 @@ app = FastAPI()
 # text = "We consistently found that participants selectively chose to learn that bad (good) things happened to bad (good) people (Studies 1 to 7) that is, they selectively exposed themselves to deserved outcomes."
 # print(f"Is the text a claim? {is_claim(text)}")
 
+GOOGLE_API_URL = f"https://speech.googleapis.com/v1p1beta1/speech:recognize?key={os.environ.get('GOOGLE_API_KEY')}"
+
+
+def send_to_google_speech_api(audio_file_path):
+    # Read the file and encode it in Base64
+    with open(audio_file_path, "rb") as f:
+        audio_content = base64.b64encode(f.read()).decode("utf-8")
+
+    # Prepare the request payload
+    payload = {
+        "config": {
+            "encoding": "LINEAR16",
+            "sampleRateHertz": 16000,
+            "languageCode": "en-US"
+        },
+        "audio": {
+            "content": audio_content
+        }
+    }
+
+    # Send the request
+    response = requests.post(GOOGLE_API_URL, json=payload)
+
+    # Parse the response
+    if response.status_code == 200:
+        response_data = response.json()
+        results = response_data.get("results", [])
+        if results:
+            return results[0]["alternatives"][0]["transcript"]
+        else:
+            return "No transcript available."
+    else:
+        raise HTTPException(
+            status_code=response.status_code,
+            detail=f"Google API error: {response.json()}"
+        )
+
+
+@app.post("/transcribe/")
+async def transcribe_audio(file: UploadFile = File(...)):
+
+
+    # Save the uploaded file temporarily
+    temp_file_path = f"temp{file.filename}"
+    with open(temp_file_path, "wb") as temp_file:
+        temp_file.write(await file.read())
+
+    try:
+        # Send the file to Google Speech-to-Text API and get the transcript
+        transcript = send_to_google_speech_api(temp_file_path)
+        return {"transcript": transcript}
+    finally:
+        # Clean up the temporary file
+        os.remove(temp_file_path)
+
 class Source:
     title: str
     url: str
@@ -94,17 +150,14 @@ class Message:
 
 class Transcript:
     id: int
-    real_id: str
     messages: list
     
     def __init__(self):
         self.id = None
-        self.real_id = None
         self.messages = []
         
     def reset(self):
         self.id = random.randint(1000, 9999)
-        self.real_id = None
         self.messages = []
     
     def add_message(self, message: Message):
@@ -157,8 +210,6 @@ def start_transcript():
     
     print(response.json().get("data").get("cid"))
     
-    transcript.real_id = response.json().get("data").get("cid")
-    
     
     return {"status": "started"}
 
@@ -166,9 +217,33 @@ def start_transcript():
 def end_transcript():
     # save to pinata
     
-    url = "https://uploads.pinata.cloud/v3/files"
+    try:
+        url = "https://api.pinata.cloud/v3/files"
+
+        querystring = {"name":"latest.json"}
+
+        headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
+
+        response = requests.request("GET", url, headers=headers, params=querystring)
     
-    print(transcript.to_json())
+        for file in response.json().get("data").get("files"):
+            
+            
+            
+            print(file.get("cid") + " " + file.get("name"))
+            url = "https://api.pinata.cloud/v3/files/" + file.get("id")
+
+            headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
+
+            response = requests.request("DELETE", url, headers=headers)
+            
+            print(response.text)
+        
+    except:
+        
+        print("No file to delete")
+    
+    url = "https://uploads.pinata.cloud/v3/files"
     
     allChats = "\n".join([message.user + ":" + message.text for message in transcript.messages])
     
@@ -182,13 +257,14 @@ def end_transcript():
         top_p = 0.1
     )
     
+    
     HTML(string=transcript.pretty()).write_pdf(str(transcript.id) + ".pdf")
     
     headers = {
         "Authorization": "Bearer " + os.environ.get("PINATA_JWT"),
     }
     
-    # Metadata
+    # # Metadata
     metadata = {
         "title": title_response.choices[0].message.content
     }
@@ -207,10 +283,19 @@ def end_transcript():
     # Make the POST request
     response = requests.post(url, data=multipart_data, headers=headers)
     
+    url = "https://uploads.pinata.cloud/v3/files"
     
-    # write the transcript to a json file
+    headers = {
+        "Authorization": "Bearer " + os.environ.get("PINATA_JWT"),
+    }
+    
     with open(str(transcript.id) + ".json", "w") as file:
         json.dump(transcript.to_json(), file)    
+
+    # # Metadata
+    metadata = {
+        "title": title_response.choices[0].message.content
+    }
 
     # Use MultipartEncoder to handle the boundary and Content-Type
     multipart_data = MultipartEncoder(
@@ -219,25 +304,18 @@ def end_transcript():
             "file": (str(transcript.id) + ".json", open(str(transcript.id) + ".json", "rb"), "application/json"),  # File to upload
         }
     )
+
+    # Add Content-Type header with boundary
+    headers["Content-Type"] = multipart_data.content_type
+
+    # Make the POST request
+    response = requests.post(url, data=multipart_data, headers=headers)
+    
     
     os.remove(str(transcript.id) + ".pdf")
     os.remove(str(transcript.id) + ".json")
-    
-    headers["Content-Type"] = multipart_data.content_type
-
-    response = requests.request("POST", url, data=multipart_data, headers=headers)
 
     print(response.text)
-    
-    
-    url = "https://api.pinata.cloud/v3/files/" + transcript.real_id
-
-    headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
-
-    response = requests.request("DELETE", url, headers=headers)
-    
-    
-    
     
     transcript.reset()
     return {"status": "ended"}
@@ -254,11 +332,17 @@ def save_latest_transcript():
         response = requests.request("GET", url, headers=headers, params=querystring)
     
         for file in response.json().get("data").get("files"):
-            url = "https://api.pinata.cloud/v3/files/" + file.get("cid")
+            
+            
+            
+            print(file.get("cid") + " " + file.get("name"))
+            url = "https://api.pinata.cloud/v3/files/" + file.get("id")
 
             headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
 
             response = requests.request("DELETE", url, headers=headers)
+            
+            print(response.text)
         
     except:
         
@@ -279,6 +363,8 @@ def save_latest_transcript():
     )
     
     os.remove("latest.json")
+    
+    headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
     
     headers["Content-Type"] = multipart_data.content_type
 
