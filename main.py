@@ -51,7 +51,7 @@ def is_claim(text: str) -> bool:
     return pred == 1
 
 # Example usage
-text = "The global temperature is rising due to human activities."
+text = "The global temperature is falling due to human activities."
 print(f"Is the text a claim? {is_claim(text)}")
 
 class Source:
