@@ -76,6 +76,10 @@ def add_transcript(message: str, user: str):
         
         claims = json.get("claims")
         
+        if not claims:
+            print("No relevant sources found.")
+            return {"fact check": "No relevant sources found."}
+        
         # print(claims[0])
         # print(claims[0].get("text"), claims[0].get("claimReview")[0].get("textualRating"))
         
@@ -98,4 +102,4 @@ def add_transcript(message: str, user: str):
     return {"fact check": None}
 
 start_transcript()
-add_transcript("The world is flat.", "1")
+add_transcript("The world is ending in 2025.", "1")
