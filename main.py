@@ -9,9 +9,7 @@ import markdown
 import os
 import openai
 import requests
-from fpdf import FPDF
 import json
-import pdfkit
 from weasyprint import HTML
 
 from dotenv import load_dotenv
@@ -25,38 +23,39 @@ client = openai.OpenAI(
 
 app = FastAPI()
 
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-# Load the model and tokenizer
-model_name = "biodatlab/score-claim-identification"
-tokenizer = AutoTokenizer.from_pretrained(model_name)
-model = AutoModelForSequenceClassification.from_pretrained(model_name)
+# from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
-def is_claim(text: str) -> bool:
-    """
-    Determine if the given text is a claim.
+# # Load the model and tokenizer
+# model_name = "biodatlab/score-claim-identification"
+# tokenizer = AutoTokenizer.from_pretrained(model_name)
+# model = AutoModelForSequenceClassification.from_pretrained(model_name)
 
-    Args:
-        text (str): The input text.
+# def is_claim(text: str) -> bool:
+#     """
+#     Determine if the given text is a claim.
 
-    Returns:
-        bool: True if the text is a claim, False otherwise.
-    """
-    # Tokenize the input text
-    inputs = tokenizer(text, return_tensors="pt", truncation=True, padding="longest")
+#     Args:
+#         text (str): The input text.
+
+#     Returns:
+#         bool: True if the text is a claim, False otherwise.
+#     """
+#     # Tokenize the input text
+#     inputs = tokenizer(text, return_tensors="pt", truncation=True, padding="longest")
     
-    # Get model predictions
-    logits = model(**inputs).logits
+#     # Get model predictions
+#     logits = model(**inputs).logits
     
-    # Get the label with the highest score
-    pred = logits.argmax(dim=1).item()
+#     # Get the label with the highest score
+#     pred = logits.argmax(dim=1).item()
     
-    # Return True if it's classified as a claim (label 1)
-    return pred == 1
+#     # Return True if it's classified as a claim (label 1)
+#     return pred == 1
 
-# Example usage
-text = "The global temperature is falling due to human activities."
-print(f"Is the text a claim? {is_claim(text)}")
+# # Example usage
+# text = "We consistently found that participants selectively chose to learn that bad (good) things happened to bad (good) people (Studies 1 to 7) that is, they selectively exposed themselves to deserved outcomes."
+# print(f"Is the text a claim? {is_claim(text)}")
 
 class Source:
     title: str
@@ -112,7 +111,7 @@ class Transcript:
         # return markdown.markdown("| User | Message |\n| --- | --- |\n" + "\n".join(["| " + message.user + " | " + message.text.replace("\n", "<br>") + " |" for message in self.messages]), extensions=['tables'], output_format='html5')
         
         # return styled html table with user and message columns
-        return "<table><tr><th>User</th><th>Message</th></tr>" + "\n".join(["<tr><td style='padding: 1rem 0; width: 125px; display: flex; flex-direction: column; justify-content: start; align-items: end;'><b>" + message.user + ":</b></td><td style='padding: 1rem 0'>" + message.text.replace("\n", "<br>") + "<br><br>" + "<br>".join([source.create_html_link() for source in message.sources]) + "</td></tr>" for message in self.messages]) + "</table>"
+        return "<table><tr><th>User</th><th>Message</th></tr>" + "\n".join(["<tr><td style='padding: 1rem 0; width: 125px; display: flex; flex-direction: column; justify-content: start; align-items: end;'><b>" + message.user + ":</b></td><td style=''>" + markdown.markdown(message.text.replace("\n", "<br>")) + "<br>" + "<br>".join([source.create_html_link() for source in message.sources]) + "</td></tr>" for message in self.messages]) + "</table>"
 
 transcript = Transcript()
 
@@ -172,8 +171,8 @@ def add_transcript(message: str, user: str):
     response = client.chat.completions.create(
         model='Meta-Llama-3.1-8B-Instruct',
         messages=[
-            {"role":"system", "content": "You are a judge trying to determine whether or not a statement in this message is a claim or a opinion."},
-            {"role":"user", "content": message + "\nRegardless of it's validity, does this message make an objective claim or a subjective opinion? Answer with only 'claim' or 'opinion'"} 
+            {"role":"system", "content": "You are a judge trying to determine whether or not a statement is worthy of being fact checked."},
+            {"role":"user", "content": message + "\nRegardless of it's validity, is the following statement worthy of being fact checked? Respond with 'yes' or 'no'."}
         ],
         temperature =  0.1,
         top_p = 0.1
@@ -181,7 +180,8 @@ def add_transcript(message: str, user: str):
 
     print(response.choices[0].message.content)
     
-    if response.choices[0].message.content.lower().startswith("claim"):
+    if response.choices[0].message.content.lower().startswith("yes"):
+    # if is_claim(message):
         
         url = "https://api.perplexity.ai/chat/completions"
 
@@ -259,5 +259,5 @@ def add_transcript(message: str, user: str):
     return {"fact check": None}
 
 start_transcript()
-add_transcript("The world is flat", "Speaker 1")
+add_transcript("There once were thousands of dragons on Earth", "Speaker 1")
 end_transcript()
