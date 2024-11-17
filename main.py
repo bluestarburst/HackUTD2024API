@@ -16,7 +16,7 @@ from weasyprint import HTML
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv(".env.local")
 
 client = openai.OpenAI(
     api_key=os.environ.get("SAMBANOVA_API_KEY"),
