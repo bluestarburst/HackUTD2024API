@@ -227,31 +227,31 @@ def start_transcript():
 def end_transcript():
     # save to pinata
     
-    try:
-        url = "https://api.pinata.cloud/v3/files"
+    # try:
+    #     url = "https://api.pinata.cloud/v3/files"
 
-        querystring = {"name":"latest.json"}
+    #     querystring = {"name":"latest.json"}
 
-        headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
+    #     headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
 
-        response = requests.request("GET", url, headers=headers, params=querystring)
+    #     response = requests.request("GET", url, headers=headers, params=querystring)
     
-        for file in response.json().get("data").get("files"):
+    #     for file in response.json().get("data").get("files"):
             
             
             
-            print(file.get("cid") + " " + file.get("name"))
-            url = "https://api.pinata.cloud/v3/files/" + file.get("id")
+    #         print(file.get("cid") + " " + file.get("name"))
+    #         url = "https://api.pinata.cloud/v3/files/" + file.get("id")
 
-            headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
+    #         headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
 
-            response = requests.request("DELETE", url, headers=headers)
+    #         response = requests.request("DELETE", url, headers=headers)
             
-            print(response.text)
+    #         print(response.text)
         
-    except:
+    # except:
         
-        print("No file to delete")
+    #     print("No file to delete")
     
     url = "https://uploads.pinata.cloud/v3/files"
     
@@ -463,6 +463,6 @@ def get_latest_transcript():
 
 start_transcript()
 add_transcript("There once were thousands of aliens on Earth", "me")
-add_transcript("Ants are 10x stronger than humans", "me")
+add_transcript("Ants are 10x stronger than humans", "speaker")
 # add_transcript("There once were thousands of aliens on Earth", "me")
 end_transcript()

@@ -1,6 +1,7 @@
 {
     "scripts": {
         "dev": "fastapi dev main.py",
-        "start": "fastapi start main.py"
+        "start": "fastapi run main.py",
+        "uv": "uvicorn main:app --port 8000"
     }
 }
