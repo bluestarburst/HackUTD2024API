@@ -73,7 +73,7 @@ def send_to_google_speech_api(audio_file_path):
     payload = {
         "config": {
             "encoding": "LINEAR16",
-            "sampleRateHertz": 16000,
+            # "sampleRateHertz": 16000,
             "languageCode": "en-US"
         },
         "audio": {
@@ -99,6 +99,13 @@ def send_to_google_speech_api(audio_file_path):
         )
 
 
+# from pydub import AudioSegment
+# sound = AudioSegment.from_wav("recording.wav")
+# sound = sound.set_channels(1)
+# sound.export("recording2.wav", format="wav")
+
+# print(send_to_google_speech_api("recording2.wav"))
+
 @app.post("/transcribe/")
 async def transcribe_audio(file: UploadFile = File(...)):
 
@@ -111,7 +118,10 @@ async def transcribe_audio(file: UploadFile = File(...)):
     try:
         # Send the file to Google Speech-to-Text API and get the transcript
         transcript = send_to_google_speech_api(temp_file_path)
-        return {"transcript": transcript}
+        
+        res = add_transcript(transcript, "me")
+        
+        return res
     finally:
         # Clean up the temporary file
         os.remove(temp_file_path)
@@ -442,8 +452,14 @@ def add_transcript(message: str, user: str):
         transcript.add_message(Message(text=result.get("choices")[0].get("message").get("content"), user="Fact Check", sources=[Source(citation) for citation in result.get("citations")]))
 
         save_latest_transcript()
+        
+        return {"fact check": result.get("choices")[0].get("message").get("content")}
 
-    return {"fact check": None}
+    return {"fact check": "null"}
+
+@app.get("/latest")
+def get_latest_transcript():
+    return transcript.to_json()
 
 start_transcript()
 add_transcript("There once were thousands of aliens on Earth", "me")
