@@ -5,6 +5,7 @@ from fastapi import FastAPI
 import random
 
 import markdown
+from pydantic import BaseModel
 
 import os
 import openai
@@ -93,14 +94,17 @@ class Message:
 
 class Transcript:
     id: int
+    real_id: str
     messages: list
     
     def __init__(self):
         self.id = None
+        self.real_id = None
         self.messages = []
         
     def reset(self):
         self.id = random.randint(1000, 9999)
+        self.real_id = None
         self.messages = []
     
     def add_message(self, message: Message):
@@ -128,6 +132,34 @@ transcript = Transcript()
 def start_transcript():
     # random id
     transcript.reset()
+    
+    url = "https://uploads.pinata.cloud/v3/files"
+    
+    headers = {
+        "Authorization": "Bearer " + os.environ.get("PINATA_JWT"),
+    }
+    
+    with open("latest.json", "w") as file:
+        json.dump(transcript.to_json(), file)    
+
+    # Use MultipartEncoder to handle the boundary and Content-Type
+    multipart_data = MultipartEncoder(
+        fields={
+            "file": ("latest.json", open("latest.json", "rb"), "application/json"),  # File to upload
+        }
+    )
+    
+    os.remove("latest.json")
+    
+    headers["Content-Type"] = multipart_data.content_type
+
+    response = requests.request("POST", url, data=multipart_data, headers=headers)
+    
+    print(response.json().get("data").get("cid"))
+    
+    transcript.real_id = response.json().get("data").get("cid")
+    
+    
     return {"status": "started"}
 
 @app.post("/end_transcript")
@@ -179,9 +211,6 @@ def end_transcript():
     # write the transcript to a json file
     with open(str(transcript.id) + ".json", "w") as file:
         json.dump(transcript.to_json(), file)    
-    
-    os.remove(str(transcript.id) + ".pdf")
-    os.remove(str(transcript.id) + ".json")
 
     # Use MultipartEncoder to handle the boundary and Content-Type
     multipart_data = MultipartEncoder(
@@ -191,6 +220,9 @@ def end_transcript():
         }
     )
     
+    os.remove(str(transcript.id) + ".pdf")
+    os.remove(str(transcript.id) + ".json")
+    
     headers["Content-Type"] = multipart_data.content_type
 
     response = requests.request("POST", url, data=multipart_data, headers=headers)
@@ -198,7 +230,11 @@ def end_transcript():
     print(response.text)
     
     
-    
+    url = "https://api.pinata.cloud/v3/files/" + transcript.real_id
+
+    headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
+
+    response = requests.request("DELETE", url, headers=headers)
     
     
     
@@ -206,11 +242,63 @@ def end_transcript():
     transcript.reset()
     return {"status": "ended"}
 
+def save_latest_transcript():
+    # save to pinata
+    try:
+        url = "https://api.pinata.cloud/v3/files"
+
+        querystring = {"name":"latest.json"}
+
+        headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
+
+        response = requests.request("GET", url, headers=headers, params=querystring)
+    
+        for file in response.json().get("data").get("files"):
+            url = "https://api.pinata.cloud/v3/files/" + file.get("cid")
+
+            headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
+
+            response = requests.request("DELETE", url, headers=headers)
+        
+    except:
+        
+        print("No file to delete")
+    
+    url = "https://uploads.pinata.cloud/v3/files"
+
+    with open("latest.json", "w") as file:
+        json.dump(transcript.to_json(), file)    
+        # write the transcript to a json file
+
+    # Use MultipartEncoder to handle the boundary and Content-Type
+    multipart_data = MultipartEncoder(
+        fields={
+            # "keyvalues": json.dumps(metadata),  # JSON metadata
+            "file": ("latest.json", open("latest.json", "rb"), "application/json"),  # File to upload
+        }
+    )
+    
+    os.remove("latest.json")
+    
+    headers["Content-Type"] = multipart_data.content_type
+
+    response = requests.request("POST", url, data=multipart_data, headers=headers)
+    
+    
+    
+    
+class Transcript(BaseModel):
+    message: str
+    user: str
+
 @app.post("/transcript")
 def add_transcript(message: str, user: str):
+    
     transcript.add_message(
         Message(text=message, user=user)
     )
+    
+    save_latest_transcript()
     
     response = client.chat.completions.create(
         model='Meta-Llama-3.1-8B-Instruct',
@@ -267,8 +355,12 @@ def add_transcript(message: str, user: str):
         
         transcript.add_message(Message(text=result.get("choices")[0].get("message").get("content"), user="Fact Check", sources=[Source(citation) for citation in result.get("citations")]))
 
+        save_latest_transcript()
+
     return {"fact check": None}
 
 start_transcript()
 add_transcript("There once were thousands of aliens on Earth", "me")
+add_transcript("There once were thousands of aliens on Earth", "me")
+# add_transcript("There once were thousands of aliens on Earth", "me")
 end_transcript()
