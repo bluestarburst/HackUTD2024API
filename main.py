@@ -21,13 +21,30 @@ client = openai.OpenAI(
 
 app = FastAPI()
 
+class Source:
+    title: str
+    url: str
+    publisher: str
+    rating: str
+    
+    def __init__(self, title: str, url: str, publisher: str, rating: str):
+        self.title = title
+        self.url = url
+        self.publisher = publisher
+        self.rating = rating
+        
+    def create_html_link(self):
+        return "<a href='" + self.url + "'>" + self.title + "</a>"
+
 class Message:
     text: str
     user: str
+    sources: list
     
-    def __init__(self, text: str, user: str):
+    def __init__(self, text: str, user: str, sources = []):
         self.text = text
         self.user = user
+        self.sources = sources
 
 class Transcript:
     id: int
@@ -58,7 +75,7 @@ class Transcript:
         # return markdown.markdown("| User | Message |\n| --- | --- |\n" + "\n".join(["| " + message.user + " | " + message.text.replace("\n", "<br>") + " |" for message in self.messages]), extensions=['tables'], output_format='html5')
         
         # return styled html table with user and message columns
-        return "<table><tr><th>User</th><th>Message</th></tr>" + "\n".join(["<tr><td style='padding: 1rem 0; width: 125px; display: flex; flex-direction: column; justify-content: start; align-items: end;'><b>" + message.user + ":</b></td><td style='padding: 1rem 0'>" + message.text.replace("\n", "<br>") + "</td></tr>" for message in self.messages]) + "</table>"
+        return "<table><tr><th>User</th><th>Message</th></tr>" + "\n".join(["<tr><td style='padding: 1rem 0; width: 125px; display: flex; flex-direction: column; justify-content: start; align-items: end;'><b>" + message.user + ":</b></td><td style='padding: 1rem 0'>" + message.text.replace("\n", "<br>") + "<br><br>" + "<br>".join([source.create_html_link() + " - (Rating: " + source.rating + ") - " + source.publisher for source in message.sources]) + "</td></tr>" for message in self.messages]) + "</table>"
 
 transcript = Transcript()
 
@@ -95,7 +112,7 @@ def end_transcript():
     }
     
     # delete the pdf file
-    os.remove(str(transcript.id) + ".pdf")
+    # os.remove(str(transcript.id) + ".pdf")
     
     headers = {
         "Authorization": "Bearer " + os.environ.get("PINATA_JWT"),
@@ -149,7 +166,7 @@ def add_transcript(message: str, user: str):
             model='Meta-Llama-3.1-8B-Instruct',
             messages=[
                 {"role":"system", "content": "You are an objective observer and your job is to condense the information into a brief summary."},
-                {"role":"user", "content": claim_context + "\nCompile the results of the previous claims and their ratings to serve as sources. Respond only to the claim in the following message:\n" + message} 
+                {"role":"user", "content": claim_context + "\nCompile the results of the previous claims and their ratings to serve as knowledge. Respond only to the claim in the following message in 2 sentences or less:\n" + message} 
             ],
             temperature =  0.1,
             top_p = 0.1
@@ -157,7 +174,7 @@ def add_transcript(message: str, user: str):
 
         print(response.choices[0].message.content)
         
-        transcript.add_message(Message(text=response.choices[0].message.content, user="Fact Check"))
+        transcript.add_message(Message(text=response.choices[0].message.content, user="Fact Check", sources=[Source(claim.get("claimReview")[0].get("title"), claim.get("claimReview")[0].get("url"), claim.get("claimReview")[0].get("publisher").get("name"), claim.get("claimReview")[0].get("textualRating")) for claim in claims]))
         
         return {"fact check": response.choices[0].message.content}
 
