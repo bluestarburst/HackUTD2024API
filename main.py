@@ -12,6 +12,8 @@ import requests
 import json
 from weasyprint import HTML
 
+from requests_toolbelt.multipart.encoder import MultipartEncoder
+
 from dotenv import load_dotenv
 
 load_dotenv(".env.local")
@@ -81,6 +83,13 @@ class Message:
         self.text = text
         self.user = user
         self.sources = sources
+        
+    def to_json(self):
+        return {
+            "text": self.text,
+            "user": self.user,
+            "sources": [source.__dict__ for source in self.sources]
+        }
 
 class Transcript:
     id: int
@@ -103,7 +112,7 @@ class Transcript:
     def to_json(self):
         return {
             "id": self.id,
-            "messages": [message.__dict__ for message in self.messages]
+            "messages": [message.to_json() for message in self.messages]
         }
         
     def pretty(self):
@@ -125,39 +134,74 @@ def start_transcript():
 def end_transcript():
     # save to pinata
     
-    # url = "https://api.pinata.cloud/data/testAuthentication"
-
-    # headers = {"Authorization": "Bearer " + os.environ.get("PINATA_JWT")}
-
-    # response = requests.request("GET", url, headers=headers)
-
-    # print(response.text)
-    
     url = "https://uploads.pinata.cloud/v3/files"
-
-    # payload = "-----011000010111000001101001\r\nContent-Disposition: form-data; name=\"name\"\r\n\r\n<string>\r\n-----011000010111000001101001\r\nContent-Disposition: form-data; name=\"group_id\"\r\n\r\n<string>\r\n-----011000010111000001101001\r\nContent-Disposition: form-data; name=\"keyvalues\"\r\n\r\n{}\r\n-----011000010111000001101001--\r\n\r\n"
-    
-    # save the transcript as a pdf file and upload it to pinata
     
     print(transcript.to_json())
     
+    allChats = "\n".join([message.user + ":" + message.text for message in transcript.messages])
+    
+    title_response = client.chat.completions.create(
+        model='Meta-Llama-3.1-8B-Instruct',
+        messages=[
+            {"role":"system", "content": "You are a an assistant tasked with generating an 5 word summary from a conversation"},
+            {"role":"user", "content": allChats + "\n Using the conversation history summarize the conversation in 5 words or less."}
+        ],
+        temperature =  0.1,
+        top_p = 0.1
+    )
+    
     HTML(string=transcript.pretty()).write_pdf(str(transcript.id) + ".pdf")
-    
-    payload = {
-        "file": open( str(transcript.id) + ".pdf", "rb")
-    }
-    
-    # delete the pdf file
-    # os.remove(str(transcript.id) + ".pdf")
     
     headers = {
         "Authorization": "Bearer " + os.environ.get("PINATA_JWT"),
-        # "Content-Type": "multipart/form-data"
+    }
+    
+    # Metadata
+    metadata = {
+        "title": title_response.choices[0].message.content
     }
 
-    response = requests.request("POST", url, data = {'key': 'value'}, files=payload, headers=headers)
+    # Use MultipartEncoder to handle the boundary and Content-Type
+    multipart_data = MultipartEncoder(
+        fields={
+            "keyvalues": json.dumps(metadata),  # JSON metadata
+            "file": (str(transcript.id) + ".pdf", open(str(transcript.id) + ".pdf", "rb"), "application/pdf"),  # File to upload
+        }
+    )
+
+    # Add Content-Type header with boundary
+    headers["Content-Type"] = multipart_data.content_type
+
+    # Make the POST request
+    response = requests.post(url, data=multipart_data, headers=headers)
+    
+    
+    # write the transcript to a json file
+    with open(str(transcript.id) + ".json", "w") as file:
+        json.dump(transcript.to_json(), file)    
+    
+    os.remove(str(transcript.id) + ".pdf")
+    os.remove(str(transcript.id) + ".json")
+
+    # Use MultipartEncoder to handle the boundary and Content-Type
+    multipart_data = MultipartEncoder(
+        fields={
+            "keyvalues": json.dumps(metadata),  # JSON metadata
+            "file": (str(transcript.id) + ".json", open(str(transcript.id) + ".json", "rb"), "application/json"),  # File to upload
+        }
+    )
+    
+    headers["Content-Type"] = multipart_data.content_type
+
+    response = requests.request("POST", url, data=multipart_data, headers=headers)
 
     print(response.text)
+    
+    
+    
+    
+    
+    
     
     transcript.reset()
     return {"status": "ended"}
@@ -222,42 +266,9 @@ def add_transcript(message: str, user: str):
         print(json.dumps(result, indent=4))
         
         transcript.add_message(Message(text=result.get("choices")[0].get("message").get("content"), user="Fact Check", sources=[Source(citation) for citation in result.get("citations")]))
-        
-        # fact check the message using google fact check tools
-        # res = requests.get("https://factchecktools.googleapis.com/v1alpha1/claims:search?query=" + message + "&key=" + os.environ.get("GOOGLE_API_KEY"))
-        
-        # print(os.environ.get("GOOGLE_API_KEY"))
-        # json = res.json()
-        
-        # claims = json.get("claims")
-        
-        # if not claims:
-        #     print("No relevant sources found.")
-        #     return {"fact check": "No relevant sources found."}
-        
-        # # print(claims[0])
-        # # print(claims[0].get("text"), claims[0].get("claimReview")[0].get("textualRating"))
-        
-        # claim_context = "\n".join(["Claim: " + claims[0].get("text"), "Rating: " + claims[0].get("claimReview")[0].get("textualRating")])
-        
-        # response = client.chat.completions.create(
-        #     model='Meta-Llama-3.1-8B-Instruct',
-        #     messages=[
-        #         {"role":"system", "content": "You are an objective observer and your job is to condense the information into a brief summary."},
-        #         {"role":"user", "content": claim_context + "\nCompile the results of the previous claims and their ratings to serve as knowledge. Respond only to the claim in the following message in 2 sentences or less:\n" + message} 
-        #     ],
-        #     temperature =  0.1,
-        #     top_p = 0.1
-        # )
-
-        # print(response.choices[0].message.content)
-        
-        # transcript.add_message(Message(text=response.choices[0].message.content, user="Fact Check", sources=[Source(claim.get("claimReview")[0].get("title"), claim.get("claimReview")[0].get("url"), claim.get("claimReview")[0].get("publisher").get("name"), claim.get("claimReview")[0].get("textualRating")) for claim in claims]))
-        
-        # return {"fact check": response.choices[0].message.content}
 
     return {"fact check": None}
 
 start_transcript()
-add_transcript("There once were thousands of dragons on Earth", "Speaker 1")
+add_transcript("There once were thousands of aliens on Earth", "me")
 end_transcript()
