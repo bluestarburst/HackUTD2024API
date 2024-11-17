@@ -19,6 +19,7 @@ client = openai.OpenAI(
 
 app = FastAPI()
 
+
 # from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 # # Load the model and tokenizer
