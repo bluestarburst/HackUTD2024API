@@ -13,6 +13,7 @@ import requests
 import json
 import base64
 from weasyprint import HTML
+from time import sleep
 
 from requests_toolbelt.multipart.encoder import MultipartEncoder
 
@@ -301,6 +302,8 @@ def end_transcript():
     
     with open(str(transcript.id) + ".json", "w") as file:
         json.dump(transcript.to_json(), file)    
+        
+    sleep(1)
 
     # # Metadata
     metadata = {
@@ -322,8 +325,8 @@ def end_transcript():
     response = requests.post(url, data=multipart_data, headers=headers)
     
     
-    os.remove(str(transcript.id) + ".pdf")
-    os.remove(str(transcript.id) + ".json")
+    # os.remove(str(transcript.id) + ".pdf")
+    # os.remove(str(transcript.id) + ".json")
 
     print(response.text)
     
@@ -453,6 +456,8 @@ def add_transcript(message: str, user: str):
 
         save_latest_transcript()
         
+        end_transcript()
+        
         return {"fact check": result.get("choices")[0].get("message").get("content")}
 
     return {"fact check": "null"}
@@ -462,7 +467,7 @@ def get_latest_transcript():
     return transcript.to_json()
 
 start_transcript()
-add_transcript("There once were thousands of aliens on Earth", "me")
-add_transcript("Ants are 10x stronger than humans", "speaker")
+# add_transcript("There once were thousands of whales on Earth", "me")
+# add_transcript("Ants are 10x stronger than humans", "speaker")
 # add_transcript("There once were thousands of aliens on Earth", "me")
-end_transcript()
+# end_transcript()
